@@ -1,0 +1,2 @@
+rules_version = '2';
+service cloud.firestore { match /databases/{database}/documents { function isOwner() { return request.auth != null && request.auth.uid == 'OWNER_UID_AFTER_FIRST_LOGIN'; } match /bookmarks/{bookmarkId} { allow read, create, update, delete: if isOwner(); } } }
