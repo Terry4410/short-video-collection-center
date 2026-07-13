@@ -1,18 +1,17 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isAllowedUser() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in [
+          "terry4410@gmail.com",
+          "baritone90064@gmail.com"
+        ];
+    }
+
     match /bookmarks/{bookmarkId} {
-      // App 會自動使用 Firebase Anonymous Authentication，不會出現登入畫面。
-      // 每筆資料都綁定建立它的匿名 UID；其他匿名使用者不能讀取或變更。
-      allow create: if request.auth != null
-        && request.resource.data.ownerId == request.auth.uid;
-      allow read: if request.auth != null
-        && resource.data.ownerId == request.auth.uid;
-      allow update: if request.auth != null
-        && resource.data.ownerId == request.auth.uid
-        && request.resource.data.ownerId == resource.data.ownerId;
-      allow delete: if request.auth != null
-        && resource.data.ownerId == request.auth.uid;
+      allow read, create, update, delete: if isAllowedUser();
     }
   }
 }
