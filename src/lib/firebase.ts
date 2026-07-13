@@ -1,5 +1,14 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app';
-import { getAuth, signInAnonymously, type Auth } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  getAuth,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
+  type Auth,
+  type User,
+} from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -13,26 +22,42 @@ const firebaseConfig = {
 
 export const isFirebaseConfigured = Boolean(
   firebaseConfig.apiKey &&
-    firebaseConfig.authDomain &&
-    firebaseConfig.projectId &&
-    firebaseConfig.appId,
+  firebaseConfig.authDomain &&
+  firebaseConfig.projectId &&
+  firebaseConfig.appId,
 );
 
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
-let firebaseSession: Promise<void> = Promise.resolve();
+let googleProvider: GoogleAuthProvider | null = null;
 
 if (isFirebaseConfigured) {
   app = initializeApp(firebaseConfig);
   db = getFirestore(app);
   auth = getAuth(app);
-  firebaseSession = signInAnonymously(auth).then(() => undefined);
+  googleProvider = new GoogleAuthProvider();
+  googleProvider.setCustomParameters({ prompt: 'select_account' });
 }
 
-export async function ensureFirebaseSession() {
-  if (!isFirebaseConfigured || !auth) throw new Error('Firebase 尚未設定');
-  return firebaseSession;
+export function watchAuthState(onChange: (user: User | null) => void) {
+  if (!auth) throw new Error('Firebase 設定不完整，請確認環境變數');
+  return onAuthStateChanged(auth, onChange);
+}
+
+export async function signInWithGoogle() {
+  if (!auth || !googleProvider) throw new Error('Firebase 設定不完整，請確認環境變數');
+  return signInWithPopup(auth, googleProvider);
+}
+
+export async function signInWithGoogleRedirect() {
+  if (!auth || !googleProvider) throw new Error('Firebase 設定不完整，請確認環境變數');
+  return signInWithRedirect(auth, googleProvider);
+}
+
+export async function signOutFromGoogle() {
+  if (!auth) return;
+  return signOut(auth);
 }
 
 export { app, auth, db };
