@@ -37,7 +37,6 @@ export type Bookmark = {
   lng?: number;
   googlePlaceId?: string;
   mapUrl?: string;
-  ownerId?: string;
   sourceText?: string;
   aiSummary?: string;
   aiSuggestedCategory?: string;
