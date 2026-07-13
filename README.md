@@ -29,8 +29,8 @@ GitHub repository → Settings → Secrets and variables → Actions → New rep
 
 接著在 Settings → Pages → Build and deployment 選擇 GitHub Actions。合併到 main 後，.github/workflows/deploy.yml 會建置並部署網站。
 
-Firebase Web App 的 API key 不是資料庫權限控管；實際權限由 Firestore Rules 決定。本專案以匿名登入限制未驗證請求。因為這是單人、未設帳號的 MVP，任何取得網站的匿名使用者仍可能讀寫收藏；正式公開使用前應改成真正的帳號登入與個人資料隔離規則。
+Firebase Web App 的 API key 不是資料庫權限控管；實際權限由 Firestore Rules 決定。本專案以匿名登入為每部裝置建立不同的 ownerId，Firestore Rules 只允許同一個匿名 UID 讀寫自己的收藏。這表示重新整理與同一部 iPhone 的資料會保留；若要跨裝置同步，第二階段需改用真正的帳號登入。
 
 ## 資料欄位
 
-bookmarks 每筆資料包含連結、平台、標題、分類、標籤、狀態、優先度、地點、ChatGPT 分析欄位與 createdAt / updatedAt 等 Firestore timestamp。完整型別定義在 src/types/bookmark.ts。
+bookmarks 每筆資料包含連結、平台、標題、分類、標籤、狀態、優先度、地點、ChatGPT 分析欄位、ownerId 與 createdAt / updatedAt 等 Firestore timestamp。完整型別定義在 src/types/bookmark.ts。
