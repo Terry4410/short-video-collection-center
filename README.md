@@ -31,6 +31,8 @@ GitHub repository → Settings → Secrets and variables → Actions → New rep
 
 Firebase Web App 的 API key 不是資料庫權限控管；實際權限由 Firestore Rules 決定。本專案以匿名登入為每部裝置建立不同的 ownerId，Firestore Rules 只允許同一個匿名 UID 讀寫自己的收藏。這表示重新整理與同一部 iPhone 的資料會保留；若要跨裝置同步，第二階段需改用真正的帳號登入。
 
+首次成功連上空白的 Firestore 時，App 會將此裝置原本 localStorage 的收藏一次匯入雲端，避免舊收藏遺失。
+
 ## 資料欄位
 
 bookmarks 每筆資料包含連結、平台、標題、分類、標籤、狀態、優先度、地點、ChatGPT 分析欄位、ownerId 與 createdAt / updatedAt 等 Firestore timestamp。完整型別定義在 src/types/bookmark.ts。
