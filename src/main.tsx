@@ -4,8 +4,10 @@ import { Bookmark as BookmarkIcon, CheckCircle2, ChevronRight, ExternalLink, Edi
 import './style.css';
 import './chatgpt.css';
 import './advanced.css';
+import './mobile-form.css';
 import { CategoryManager, GoogleMapPanel } from './AdvancedPanels';
 import { isFirebaseConfigured, signInWithGoogle, signInWithGoogleRedirect, signOutFromGoogle, watchAuthState } from './lib/firebase';
+import { parseChatGptAnalysisResult } from './lib/chatgptAnalysis';
 import { addBookmark, deleteBookmark, subscribeBookmarks, updateBookmark } from './services/bookmarkService';
 import type { Bookmark, BookmarkInput, BookmarkPriority, BookmarkStatus } from './types/bookmark';
 
@@ -31,7 +33,7 @@ const defaultSubCategories: Record<string, string[]> = {
 const normalizeStatus = (status: unknown): BookmarkStatus => status === 'AI已整理' || status === 'AI 待確認' ? 'AI待確認' : (statuses.includes(status as BookmarkStatus) ? status as BookmarkStatus : '待整理');
 function platform(url: string) { const value = url.toLowerCase(); if (value.includes('youtube.com') || value.includes('youtu.be')) return 'YouTube'; if (value.includes('tiktok.com')) return 'TikTok'; if (value.includes('instagram.com')) return 'Instagram'; if (value.includes('threads.com')) return 'Threads'; if (value.includes('facebook.com') || value.includes('fb.watch')) return 'Facebook'; return 'Other'; }
 function thumbnail(url: string) { const match = url.match(/(?:youtu.be\/|v=|shorts\/)([\w-]{6,})/); return match ? 'https://img.youtube.com/vi/' + match[1] + '/mqdefault.jpg' : ''; }
-function emptyBookmark(): Bookmark { return { id: '', url: '', platform: 'Other', title: '', description: '', note: '', mainCategory: '其他', subCategory: '', tags: [], status: '待整理', priority: '中', thumbnailUrl: '', hasLocation: false, placeName: '', address: '', googlePlaceId: '', mapUrl: '', sourceText: '', aiSummary: '', aiSuggestedCategory: '', aiSuggestedTags: [], aiSuggestedStatus: '', aiSuggestedLocation: '', aiConfidence: 0, createdAt: null, updatedAt: null }; }
+function emptyBookmark(): Bookmark { return { id: '', url: '', platform: 'Other', title: '', description: '', note: '', mainCategory: '其他', subCategory: '', tags: [], status: '待整理', priority: '中', thumbnailUrl: '', hasLocation: false, placeName: '', address: '', addressHint: '', googlePlaceId: '', mapUrl: '', sourceText: '', aiSummary: '', aiSuggestedCategory: '', aiSuggestedTags: [], aiSuggestedStatus: '', aiSuggestedLocation: '', aiConfidence: 0, analysisBasis: '', needsConfirmation: false, createdAt: null, updatedAt: null }; }
 function normalBookmark(value: Partial<Bookmark>): Bookmark { return { ...emptyBookmark(), ...value, id: value.id || crypto.randomUUID(), platform: value.platform || platform(value.url || ''), status: normalizeStatus(value.status), priority: (value.priority === '高' || value.priority === '低' ? value.priority : '中') as BookmarkPriority, tags: Array.isArray(value.tags) ? value.tags : [], hasLocation: Boolean(value.hasLocation) }; }
 function localBookmarks(): Bookmark[] { try { const stored = JSON.parse(localStorage.getItem(FALLBACK_KEY) || '[]'); return Array.isArray(stored) ? stored.map(normalBookmark) : []; } catch { return []; } }
 function dateNumber(value: Bookmark['createdAt'] | Bookmark['updatedAt']) { if (!value) return 0; if (typeof value === 'string') return new Date(value).getTime(); if (value instanceof Date) return value.getTime(); return value.toDate().getTime(); }
@@ -52,7 +54,7 @@ function BookmarkCard({ item, edit, remove }: { item: Bookmark; edit: (item: Boo
   </article>;
 }
 
-function LoginGate({ state, email, error }: { state: AuthState; email?: string; error?: string }) {
+function LoginGate({ state, error }: { state: AuthState; error?: string }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(error || '');
   const login = async (useRedirect = false) => {
@@ -67,8 +69,8 @@ function LoginGate({ state, email, error }: { state: AuthState; email?: string; 
   };
   if (state === 'checking') return <section className="login-gate"><p className="login-gate__brand">短影音收藏中心</p><h1>正在確認登入狀態</h1><p>請稍候…</p></section>;
   if (state === 'configError') return <section className="login-gate"><p className="login-gate__brand">短影音收藏中心</p><h1>Firebase 設定不完整</h1><p>{error || '請確認 GitHub Actions 的 Firebase 環境變數。'}</p></section>;
-  if (state === 'unauthorized') return <section className="login-gate"><p className="login-gate__brand">短影音收藏中心</p><h1>此帳號沒有使用權限</h1><p>{email || '目前帳號'} 不在允許清單內。請改用 terry4410@gmail.com 或 baritone90064@gmail.com 登入。</p><button className="google-login-button" onClick={() => signOutFromGoogle()}>登出</button></section>;
-  return <section className="login-gate"><p className="login-gate__brand">短影音收藏中心</p><h1>請使用授權的 Google 帳號登入</h1><p>只有 terry4410@gmail.com 與 baritone90064@gmail.com 可讀寫收藏資料。</p><button className="google-login-button" disabled={busy} onClick={() => login()}>{busy ? '登入中…' : '使用 Google 登入'}</button><button className="redirect-login-button" disabled={busy} onClick={() => login(true)}>手機無法跳出視窗？改用重新導向登入</button>{message && <p className="login-gate__error">{message}</p>}</section>;
+  if (state === 'unauthorized') return <section className="login-gate"><p className="login-gate__brand">短影音收藏中心</p><h1>無法使用此服務</h1><p>此 Google 帳號目前沒有使用權限，請聯絡系統管理者。</p><button className="google-login-button" onClick={() => signOutFromGoogle()}>登出</button></section>;
+  return <section className="login-gate"><p className="login-gate__brand">短影音收藏中心</p><h1>請先登入</h1><p>請使用已授權的 Google 帳號登入。</p><button className="google-login-button" disabled={busy} onClick={() => login()}>{busy ? '登入中…' : '使用 Google 登入'}</button><button className="redirect-login-button" disabled={busy} onClick={() => login(true)}>手機無法跳出視窗？改用重新導向登入</button>{message && <p className="login-gate__error">{message}</p>}</section>;
 }
 
 function BookmarkForm({ initial, categories, subCategories, save, cancel, saving }: { initial: Bookmark; categories: string[]; subCategories: Record<string, string[]>; save: (item: Bookmark) => Promise<void>; cancel: () => void; saving: boolean }) {
@@ -93,15 +95,47 @@ function BookmarkForm({ initial, categories, subCategories, save, cancel, saving
       }
     } catch { setMessage('無法直接取得公開標題；仍可使用下方 Prompt，由 ChatGPT 嘗試讀取公開內容。'); } finally { setGetting(false); }
   };
-  const makePrompt = () => ['請分析以下公開短影音連結：', '連結：' + item.url, '平台：' + item.platform, '目前取得的標題：' + (item.title || '未取得'), '', '請先嘗試讀取公開連結可取得的標題、描述、字幕或頁面內容。', '', '重要規則：', '1. 不可根據單一地名、模糊標題或個人推測，自行猜測影片內容。', '2. 若無法讀取足以判斷內容的公開文字：mainCategory 必須填「其他」、subCategory 與 placeName 必須為空字串、tags 只保留可確認關鍵字、hasLocation 必須為 false、status 必須填「待整理」、priority 必須填「低」、confidence 必須低於 30，summary 必須以「待確認：」開頭。', '3. 只有影片文字明確提到特定餐廳、店家、景點或地址時，hasLocation 才能為 true。', '4. 西門町、台北、台南等區域名稱不能單獨當作 placeName。', '5. confidence 必須是 0 到 100 的整數。', '6. 只回傳 JSON，不要 Markdown。', '', 'JSON 格式：', '{"title":"","summary":"","mainCategory":"","subCategory":"","tags":[],"placeName":"","addressHint":"","hasLocation":false,"status":"","priority":"","confidence":0,"analysisBasis":"public_content | title_only | unavailable","needsConfirmation":true}'].join('\n');
+  const makePrompt = () => ['請分析以下公開短影音連結：', '', '連結：' + item.url, '平台：' + item.platform, '目前取得的標題：' + (item.title || '未取得'), '', '請先嘗試根據可取得的公開資訊判斷內容，例如：標題、描述、字幕、頁面文字或分享文字。', '', '重要規則：', '1. 不可根據單一地名、模糊標題或個人推測，自行猜測影片內容。', '2. 若無法讀取足以判斷內容的公開文字：', '   - mainCategory 必須填「其他」', '   - subCategory 必須為空字串', '   - placeName 必須為空字串', '   - addressHint 必須為空字串', '   - tags 只保留可確認關鍵字', '   - hasLocation 必須為 false', '   - status 必須填「待整理」', '   - priority 必須填「低」', '   - confidence 必須低於 30', '   - summary 必須以「待確認：」開頭', '   - analysisBasis 請填 "title_only" 或 "unavailable"', '   - needsConfirmation 必須為 true', '3. 只有影片文字明確提到特定餐廳、店家、景點、地址或可識別地點時，hasLocation 才能為 true。', '4. 西門町、台北、台南、新竹、日本、韓國等區域名稱不能單獨當作 placeName。', '5. confidence 必須是 0 到 100 的整數。', '6. 請只回傳一個 JSON object，不要 Markdown，不要額外說明。', '', '請使用以下 JSON 格式：', '', '{', '  "title": "",', '  "summary": "",', '  "mainCategory": "",', '  "subCategory": "",', '  "tags": [],', '  "placeName": "",', '  "addressHint": "",', '  "hasLocation": false,', '  "status": "",', '  "priority": "",', '  "confidence": 0,', '  "analysisBasis": "public_content",', '  "needsConfirmation": true', '}'].join('\n');
   const copyPrompt = async () => { if (!item.url) { setMessage('請先貼上影片連結。'); return; } await navigator.clipboard.writeText(makePrompt()); setMessage('Prompt 已複製。請在 ChatGPT Plus 貼上分析，再將 JSON 貼回這裡。'); };
   const applyJson = () => {
     try {
-      const fence = String.fromCharCode(96).repeat(3);
-      const result = JSON.parse(json.trim().replace(fence + 'json', '').replace(fence, '').trim());
-      setItem((current) => ({ ...current, title: result.title || current.title, mainCategory: categories.includes(result.mainCategory) ? result.mainCategory : current.mainCategory, subCategory: result.subCategory || '', tags: Array.isArray(result.tags) ? result.tags.map(String) : current.tags, status: normalizeStatus(result.status || 'AI待確認'), priority: result.priority === '高' || result.priority === '低' ? result.priority : '中', note: result.summary || current.note, hasLocation: typeof result.hasLocation === 'boolean' ? result.hasLocation : current.hasLocation, placeName: result.placeName || '', address: result.addressHint || '', aiSummary: result.summary || current.aiSummary, aiSuggestedCategory: result.mainCategory || '', aiSuggestedTags: Array.isArray(result.tags) ? result.tags.map(String) : [], aiSuggestedStatus: normalizeStatus(result.status || 'AI待確認'), aiSuggestedLocation: result.placeName || '', aiConfidence: Number(result.confidence) || 0 }));
-      setMessage('JSON 已套用；請確認完整資料與地點後儲存。');
-    } catch { setMessage('JSON 格式無法辨識，請確認貼上的是完整 JSON。'); }
+      const result = parseChatGptAnalysisResult(json);
+      const hasManualValue = Boolean(item.title || item.note || item.placeName || item.address);
+      const changesExistingValue = hasManualValue && Boolean(
+        (result.title && item.title && result.title !== item.title)
+        || (result.placeName !== undefined && result.placeName !== item.placeName)
+        || (result.addressHint !== undefined && result.addressHint !== item.address),
+      );
+      if (changesExistingValue && !window.confirm('套用分析結果會更新目前已填寫的名稱或地點資料，是否繼續？')) return;
+      const confidence = result.confidence ?? item.aiConfidence ?? 0;
+      const needsConfirmation = result.needsConfirmation ?? confidence < 80;
+      const requestedStatus = result.status ? normalizeStatus(result.status) : item.status;
+      const status = needsConfirmation && requestedStatus === '已確認' ? 'AI待確認' : requestedStatus;
+      setItem((current) => ({
+        ...current,
+        title: result.title || current.title,
+        description: result.summary || current.description,
+        note: current.note || result.summary || '',
+        mainCategory: result.mainCategory && categories.includes(result.mainCategory) ? result.mainCategory : current.mainCategory,
+        subCategory: result.subCategory ?? current.subCategory,
+        tags: result.tags ?? current.tags,
+        status,
+        priority: result.priority === '高' || result.priority === '中' || result.priority === '低' ? result.priority : current.priority,
+        hasLocation: typeof result.hasLocation === 'boolean' ? result.hasLocation : current.hasLocation,
+        placeName: result.placeName ?? current.placeName,
+        address: result.addressHint ?? current.address,
+        addressHint: result.addressHint ?? current.addressHint,
+        aiSummary: result.summary || current.aiSummary,
+        aiSuggestedCategory: result.mainCategory || current.aiSuggestedCategory,
+        aiSuggestedTags: result.tags ?? current.aiSuggestedTags,
+        aiSuggestedStatus: status,
+        aiSuggestedLocation: result.placeName ?? current.aiSuggestedLocation,
+        aiConfidence: confidence,
+        analysisBasis: result.analysisBasis || current.analysisBasis,
+        needsConfirmation,
+      }));
+      setMessage(needsConfirmation ? '已套用 ChatGPT 分析結果。此筆資料需要人工確認。' : '已套用 ChatGPT 分析結果');
+    } catch { setMessage('無法讀取 JSON，請確認貼上的內容是 ChatGPT 回傳的 JSON 格式。'); }
   };
   const submit = async () => { await save({ ...item, title: item.title.trim() || item.platform + ' 收藏', platform: platform(item.url), thumbnailUrl: item.thumbnailUrl || thumbnail(item.url) }); };
   return <section className="bookmark-form">
@@ -109,7 +143,7 @@ function BookmarkForm({ initial, categories, subCategories, save, cancel, saving
     <label>影片連結<input autoFocus value={item.url} onChange={(event) => { set('url', event.target.value); set('platform', platform(event.target.value)); }} onBlur={loadMetadata} placeholder="貼上 TikTok、Reels、Shorts…" /></label>
     <button className="metadata-button" onClick={loadMetadata} disabled={getting}>{getting ? '正在取得公開資訊…' : '取得公開標題與平台資訊'}</button>
     <label>收藏名稱<input value={item.title} onChange={(event) => set('title', event.target.value)} placeholder="為這筆收藏取一個容易找到的名稱" /></label>
-    <section className="chatgpt-flow"><h2>使用 ChatGPT Plus 分析</h2><p>不需要 API Key。系統會帶入連結與已取得的公開標題，讓 ChatGPT 回傳可直接套用的 JSON。</p><button className="ai-button" onClick={copyPrompt}><Sparkles size={18} />複製 ChatGPT Prompt</button><label>貼回 ChatGPT 的 JSON 結果<textarea value={json} onChange={(event) => setJson(event.target.value)} placeholder="貼上 ChatGPT 回傳的 JSON" /></label><button className="apply-json-button" onClick={applyJson}><CheckCircle2 size={18} />套用 JSON 並自動回填</button>{message && <div className="form-message">{message}</div>}</section>
+    <section className="chatgpt-flow"><h2>ChatGPT 輔助分析</h2><p>複製 Prompt 到 ChatGPT，將回傳的 JSON 貼回這裡，即可自動填入分類、標籤與摘要。</p><button className="ai-button" onClick={copyPrompt}><Sparkles size={18} />複製 Prompt</button><label>貼回 ChatGPT 的 JSON 結果<textarea value={json} onChange={(event) => setJson(event.target.value)} placeholder="貼上 ChatGPT 回傳的 JSON" /></label><button className="apply-json-button" onClick={applyJson}><CheckCircle2 size={18} />套用 JSON</button>{item.needsConfirmation && <div className="analysis-warning">此筆資料需要人工確認{(item.aiConfidence ?? 0) < 30 ? '（低信心）' : ''}</div>}{message && <div className="form-message">{message}</div>}</section>
     <section className="full-form"><h2>完整資料與地點</h2>
       <div className="form-grid"><label>平台<select value={item.platform} onChange={(event) => set('platform', event.target.value)}>{['YouTube', 'TikTok', 'Instagram', 'Threads', 'Facebook', 'Other'].map((value) => <option key={value}>{value}</option>)}</select></label><label>狀態<select value={item.status} onChange={(event) => set('status', normalizeStatus(event.target.value))}>{statuses.map((value) => <option key={value}>{value}</option>)}</select></label></div>
       <div className="form-grid"><label>主分類<select value={item.mainCategory} onChange={(event) => { set('mainCategory', event.target.value); set('subCategory', ''); }}>{categories.map((value) => <option key={value}>{value}</option>)}</select></label><label>子分類<select value={item.subCategory || ''} onChange={(event) => set('subCategory', event.target.value)}><option value="">請選擇</option>{(subCategories[item.mainCategory] || []).map((value) => <option key={value}>{value}</option>)}</select></label></div>
@@ -194,7 +228,7 @@ function App() {
   const cards: Array<{ label: string; status: BookmarkStatus }> = [{ label: '待整理', status: '待整理' }, { label: 'AI待確認', status: 'AI待確認' }, { label: '想看', status: '想看' }, { label: '想學', status: '想學' }, { label: '想買', status: '想買' }, { label: '想去', status: '想去' }];
   const pageTitle: Record<Tab, string> = { 首頁: '首頁', 收藏: '收藏', 地圖: '地圖', 新增: editing?.id ? '編輯收藏' : '新增收藏', 分類: '分類' };
   const nav: Array<{ label: Tab; icon: typeof Home }> = [{ label: '首頁', icon: Home }, { label: '收藏', icon: BookmarkIcon }, { label: '地圖', icon: Map }, { label: '新增', icon: Plus }, { label: '分類', icon: Layers }];
-  if (authState !== 'authorized') return <LoginGate state={authState} email={authEmail} error={dataMessage} />;
+  if (authState !== 'authorized') return <LoginGate state={authState} error={dataMessage} />;
   return <main className="app-shell">
     <header className="app-header"><div><p className="app-header__brand">短影音收藏中心</p><h1>{pageTitle[tab]}</h1></div><div className="header-actions"><button className="account-button" onClick={() => signOutFromGoogle()} title={'已登入：' + authEmail}>登出</button>{(tab === '首頁' || tab === '收藏') && <button className="quick-add-button" onClick={openNew}><Plus size={20} /><span>快速新增</span></button>}</div></header>
     {dataMessage && <p className="data-notice">{dataMessage}</p>}
