@@ -4,24 +4,18 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
   updateDoc,
-  where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
+import { db } from '../lib/firebase';
 import type { Bookmark, BookmarkInput } from '../types/bookmark';
 
 const bookmarksCollection = () => {
   if (!db) throw new Error('Firebase 尚未設定');
   return collection(db, 'bookmarks');
-};
-
-const currentOwnerId = () => {
-  const ownerId = auth?.currentUser?.uid;
-  if (!ownerId) throw new Error('Firebase 匿名工作階段尚未就緒');
-  return ownerId;
 };
 
 const toBookmark = (id: string, data: Record<string, unknown>): Bookmark => ({
@@ -44,7 +38,6 @@ const toBookmark = (id: string, data: Record<string, unknown>): Bookmark => ({
   lng: typeof data.lng === 'number' ? data.lng : undefined,
   googlePlaceId: String(data.googlePlaceId || ''),
   mapUrl: String(data.mapUrl || ''),
-  ownerId: String(data.ownerId || ''),
   sourceText: String(data.sourceText || ''),
   aiSummary: String(data.aiSummary || ''),
   aiSuggestedCategory: String(data.aiSuggestedCategory || ''),
@@ -77,7 +70,7 @@ export function subscribeBookmarks(
   onChange: (bookmarks: Bookmark[]) => void,
   onError: (error: Error) => void,
 ): Unsubscribe {
-  const bookmarkQuery = query(bookmarksCollection(), where('ownerId', '==', currentOwnerId()));
+  const bookmarkQuery = query(bookmarksCollection(), orderBy('updatedAt', 'desc'));
   return onSnapshot(
     bookmarkQuery,
     (snapshot) =>
@@ -89,7 +82,6 @@ export function subscribeBookmarks(
 export async function addBookmark(bookmark: BookmarkInput) {
   return addDoc(bookmarksCollection(), {
     ...bookmark,
-    ownerId: currentOwnerId(),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
