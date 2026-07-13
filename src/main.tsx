@@ -5,7 +5,7 @@ import './style.css';
 import './chatgpt.css';
 import './advanced.css';
 import { CategoryManager, GoogleMapPanel } from './AdvancedPanels';
-import { ensureFirebaseSession, isFirebaseConfigured } from './lib/firebase';
+import { isFirebaseConfigured, signInWithGoogle, signInWithGoogleRedirect, signOutFromGoogle, watchAuthState } from './lib/firebase';
 import { addBookmark, deleteBookmark, subscribeBookmarks, updateBookmark } from './services/bookmarkService';
 import type { Bookmark, BookmarkInput, BookmarkPriority, BookmarkStatus } from './types/bookmark';
 
@@ -13,9 +13,11 @@ type Tab = '首頁' | '收藏' | '地圖' | '新增' | '分類';
 type SortOption = 'recentCreated' | 'recentUpdated' | 'priority';
 type LocationFilter = '全部' | '有地點' | '無地點';
 type DataSource = 'firebase' | 'fallback';
+type AuthState = 'checking' | 'signedOut' | 'unauthorized' | 'authorized' | 'configError';
 const CONFIG_KEY = 'shortVideoCategoryConfig';
 const FALLBACK_KEY = 'shortVideoBookmarks';
 const FALLBACK_MIGRATED_KEY = 'shortVideoBookmarksMigratedToFirestore';
+const ALLOWED_EMAILS = ['terry4410@gmail.com', 'baritone90064@gmail.com'];
 const defaultCategories = ['旅遊', '美食', '購物', '知識', '學習', 'AI工具', '工作', '投資', '生活', '車用', '健康', '其他'];
 const statuses: BookmarkStatus[] = ['待整理', 'AI待確認', '已確認', '想看', '想學', '想買', '想去', '進行中', '已完成', '已購買', '已去過', '封存'];
 const defaultSubCategories: Record<string, string[]> = {
@@ -33,6 +35,7 @@ function emptyBookmark(): Bookmark { return { id: '', url: '', platform: 'Other'
 function normalBookmark(value: Partial<Bookmark>): Bookmark { return { ...emptyBookmark(), ...value, id: value.id || crypto.randomUUID(), platform: value.platform || platform(value.url || ''), status: normalizeStatus(value.status), priority: (value.priority === '高' || value.priority === '低' ? value.priority : '中') as BookmarkPriority, tags: Array.isArray(value.tags) ? value.tags : [], hasLocation: Boolean(value.hasLocation) }; }
 function localBookmarks(): Bookmark[] { try { const stored = JSON.parse(localStorage.getItem(FALLBACK_KEY) || '[]'); return Array.isArray(stored) ? stored.map(normalBookmark) : []; } catch { return []; } }
 function dateNumber(value: Bookmark['createdAt'] | Bookmark['updatedAt']) { if (!value) return 0; if (typeof value === 'string') return new Date(value).getTime(); if (value instanceof Date) return value.getTime(); return value.toDate().getTime(); }
+function distanceKm(from: { lat: number; lng: number }, to: { lat: number; lng: number }) { const radians = (value: number) => value * Math.PI / 180; const dLat = radians(to.lat - from.lat); const dLng = radians(to.lng - from.lng); const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(from.lat)) * Math.cos(radians(to.lat)) * Math.sin(dLng / 2) ** 2; return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); }
 function placeQuery(item: Bookmark) { return typeof item.lat === 'number' && typeof item.lng === 'number' ? item.lat + ',' + item.lng : item.address || item.placeName || ''; }
 function mapUrl(item: Bookmark) { return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(placeQuery(item)); }
 function directionsUrl(item: Bookmark) { return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(placeQuery(item)) + '&travelmode=driving'; }
@@ -47,6 +50,25 @@ function BookmarkCard({ item, edit, remove }: { item: Bookmark; edit: (item: Boo
       <div className="bookmark-actions"><a href={item.url} target="_blank" rel="noreferrer"><ExternalLink size={16} />影片</a><button onClick={() => edit(item)}><Edit3 size={16} />編輯</button>{item.hasLocation && placeQuery(item) && <><a href={mapUrl(item)} target="_blank" rel="noreferrer"><Map size={16} />地圖</a><a href={directionsUrl(item)} target="_blank" rel="noreferrer"><Navigation size={16} />導航</a></>}<button className="danger-button" onClick={() => remove(item.id)} aria-label="刪除收藏"><Trash2 size={16} /></button></div>
     </div>
   </article>;
+}
+
+function LoginGate({ state, email, error }: { state: AuthState; email?: string; error?: string }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(error || '');
+  const login = async (useRedirect = false) => {
+    setBusy(true); setMessage('');
+    try {
+      if (useRedirect) await signInWithGoogleRedirect();
+      else await signInWithGoogle();
+    } catch (reason) {
+      const text = reason instanceof Error ? reason.message : 'Google 登入失敗，請再試一次。';
+      setMessage(text);
+    } finally { setBusy(false); }
+  };
+  if (state === 'checking') return <section className="login-gate"><p className="login-gate__brand">短影音收藏中心</p><h1>正在確認登入狀態</h1><p>請稍候…</p></section>;
+  if (state === 'configError') return <section className="login-gate"><p className="login-gate__brand">短影音收藏中心</p><h1>Firebase 設定不完整</h1><p>{error || '請確認 GitHub Actions 的 Firebase 環境變數。'}</p></section>;
+  if (state === 'unauthorized') return <section className="login-gate"><p className="login-gate__brand">短影音收藏中心</p><h1>此帳號沒有使用權限</h1><p>{email || '目前帳號'} 不在允許清單內。請改用 terry4410@gmail.com 或 baritone90064@gmail.com 登入。</p><button className="google-login-button" onClick={() => signOutFromGoogle()}>登出</button></section>;
+  return <section className="login-gate"><p className="login-gate__brand">短影音收藏中心</p><h1>請使用授權的 Google 帳號登入</h1><p>只有 terry4410@gmail.com 與 baritone90064@gmail.com 可讀寫收藏資料。</p><button className="google-login-button" disabled={busy} onClick={() => login()}>{busy ? '登入中…' : '使用 Google 登入'}</button><button className="redirect-login-button" disabled={busy} onClick={() => login(true)}>手機無法跳出視窗？改用重新導向登入</button>{message && <p className="login-gate__error">{message}</p>}</section>;
 }
 
 function BookmarkForm({ initial, categories, subCategories, save, cancel, saving }: { initial: Bookmark; categories: string[]; subCategories: Record<string, string[]>; save: (item: Bookmark) => Promise<void>; cancel: () => void; saving: boolean }) {
@@ -115,11 +137,22 @@ function App() {
   const [source, setSource] = useState<DataSource>(isFirebaseConfigured ? 'firebase' : 'fallback');
   const [dataMessage, setDataMessage] = useState('');
   const [saving, setSaving] = useState(false);
+  const [authState, setAuthState] = useState<AuthState>(isFirebaseConfigured ? 'checking' : 'configError');
+  const [authEmail, setAuthEmail] = useState('');
+  const [selectedBookmark, setSelectedBookmark] = useState<Bookmark | null>(null);
+  const [currentPosition, setCurrentPosition] = useState<{ lat: number; lng: number } | null>(null);
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
-    if (!isFirebaseConfigured) { setSource('fallback'); setBookmarks(localBookmarks()); setDataMessage('Firebase 尚未設定，目前使用此裝置的暫存資料。'); return; }
-    ensureFirebaseSession().then(() => {
-      unsubscribe = subscribeBookmarks((next) => {
+    let unsubscribeBookmarks: (() => void) | undefined;
+    if (!isFirebaseConfigured) { setAuthState('configError'); return; }
+    const unsubscribeAuth = watchAuthState((user) => {
+      unsubscribeBookmarks?.();
+      unsubscribeBookmarks = undefined;
+      if (!user) { setAuthEmail(''); setBookmarks([]); setAuthState('signedOut'); return; }
+      const email = (user.email || '').trim().toLowerCase();
+      setAuthEmail(email);
+      if (!ALLOWED_EMAILS.includes(email)) { setBookmarks([]); setAuthState('unauthorized'); return; }
+      setAuthState('authorized');
+      unsubscribeBookmarks = subscribeBookmarks((next) => {
         const legacy = localBookmarks();
         if (!next.length && legacy.length && !localStorage.getItem(FALLBACK_MIGRATED_KEY)) {
           setDataMessage('正在將這台裝置原有的 ' + legacy.length + ' 筆收藏匯入 Firestore…');
@@ -127,9 +160,9 @@ function App() {
           return;
         }
         setSource('firebase'); setBookmarks(next.map(normalBookmark)); setDataMessage('');
-      }, (error) => { setSource('fallback'); setBookmarks(localBookmarks()); setDataMessage('Firestore 無法連線：' + error.message + '。目前改用這台裝置的暫存資料。'); });
-    }).catch((error: Error) => { setSource('fallback'); setBookmarks(localBookmarks()); setDataMessage('Firebase 驗證或 Firestore 無法連線：' + error.message + '。目前改用這台裝置的暫存資料。'); });
-    return () => unsubscribe?.();
+      }, (error) => { setDataMessage((error as Error & { code?: string }).code === 'permission-denied' ? 'Firestore 權限不足，請確認登入帳號與安全規則。' : 'Firestore 連線失敗：' + error.message); });
+    });
+    return () => { unsubscribeBookmarks?.(); unsubscribeAuth(); };
   }, []);
   useEffect(() => { localStorage.setItem(CONFIG_KEY, JSON.stringify({ categories, subCategories })); }, [categories, subCategories]);
   useEffect(() => { if (source === 'fallback') localStorage.setItem(FALLBACK_KEY, JSON.stringify(bookmarks)); }, [bookmarks, source]);
@@ -151,17 +184,25 @@ function App() {
     return bookmarks.filter((item) => categoryFilter === '全部' || item.mainCategory === categoryFilter).filter((item) => statusFilter === '全部' || item.status === statusFilter).filter((item) => locationFilter === '全部' || (locationFilter === '有地點' ? item.hasLocation : !item.hasLocation)).filter((item) => !key || [item.title, item.note, item.aiSummary, item.tags.join(' ')].join(' ').toLowerCase().includes(key)).sort((a, b) => sort === 'priority' ? weight[b.priority] - weight[a.priority] || dateNumber(b.updatedAt || b.createdAt) - dateNumber(a.updatedAt || a.createdAt) : sort === 'recentUpdated' ? dateNumber(b.updatedAt || b.createdAt) - dateNumber(a.updatedAt || a.createdAt) : dateNumber(b.createdAt) - dateNumber(a.createdAt));
   }, [bookmarks, categoryFilter, statusFilter, locationFilter, search, sort]);
   const highPriority = bookmarks.filter((item) => item.priority === '高' && item.status !== '封存').sort((a, b) => dateNumber(b.updatedAt || b.createdAt) - dateNumber(a.updatedAt || a.createdAt));
+  const locationBookmarks = bookmarks.filter((item) => item.hasLocation);
+  const nearbyBookmarks = [...locationBookmarks].sort((a, b) => {
+    if (!currentPosition) return dateNumber(b.updatedAt || b.createdAt) - dateNumber(a.updatedAt || a.createdAt);
+    const aDistance = typeof a.lat === 'number' && typeof a.lng === 'number' ? distanceKm(currentPosition, { lat: a.lat, lng: a.lng }) : Number.POSITIVE_INFINITY;
+    const bDistance = typeof b.lat === 'number' && typeof b.lng === 'number' ? distanceKm(currentPosition, { lat: b.lat, lng: b.lng }) : Number.POSITIVE_INFINITY;
+    return aDistance - bDistance;
+  });
   const cards: Array<{ label: string; status: BookmarkStatus }> = [{ label: '待整理', status: '待整理' }, { label: 'AI待確認', status: 'AI待確認' }, { label: '想看', status: '想看' }, { label: '想學', status: '想學' }, { label: '想買', status: '想買' }, { label: '想去', status: '想去' }];
   const pageTitle: Record<Tab, string> = { 首頁: '首頁', 收藏: '收藏', 地圖: '地圖', 新增: editing?.id ? '編輯收藏' : '新增收藏', 分類: '分類' };
   const nav: Array<{ label: Tab; icon: typeof Home }> = [{ label: '首頁', icon: Home }, { label: '收藏', icon: BookmarkIcon }, { label: '地圖', icon: Map }, { label: '新增', icon: Plus }, { label: '分類', icon: Layers }];
+  if (authState !== 'authorized') return <LoginGate state={authState} email={authEmail} error={dataMessage} />;
   return <main className="app-shell">
-    <header className="app-header"><div><p className="app-header__brand">短影音收藏中心</p><h1>{pageTitle[tab]}</h1></div>{(tab === '首頁' || tab === '收藏') && <button className="quick-add-button" onClick={openNew}><Plus size={20} /><span>快速新增</span></button>}</header>
+    <header className="app-header"><div><p className="app-header__brand">短影音收藏中心</p><h1>{pageTitle[tab]}</h1></div><div className="header-actions"><button className="account-button" onClick={() => signOutFromGoogle()} title={'已登入：' + authEmail}>登出</button>{(tab === '首頁' || tab === '收藏') && <button className="quick-add-button" onClick={openNew}><Plus size={20} /><span>快速新增</span></button>}</div></header>
     {dataMessage && <p className="data-notice">{dataMessage}</p>}
     {tab === '首頁' && <><button className="home-quick-entry" onClick={openNew}><Plus size={24} />快速貼上短影音連結<ChevronRight size={20} /></button><section className="status-stat-grid">{cards.map((card) => <button key={card.status} onClick={() => selectStatus(card.status)}><b>{bookmarks.filter((item) => item.status === card.status).length}</b><span>{card.label}</span></button>)}</section><section className="section-heading"><div><p>優先處理</p><h2>高優先度收藏</h2></div></section>{highPriority.length ? highPriority.map((item) => <BookmarkCard key={item.id} item={item} edit={edit} remove={remove} />) : <div className="empty-state">目前沒有高優先度收藏</div>}</>}
     {tab === '收藏' && <><div className="search-box"><Search size={20} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜尋標題、筆記或標籤" /></div><section className="filter-panel"><p>主分類</p><div className="filter-chips">{['全部', ...categories].map((category) => <button key={category} className={categoryFilter === category ? 'selected' : ''} onClick={() => setCategoryFilter(category)}>{category}</button>)}</div><div className="filter-selects"><label>狀態<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as '全部' | BookmarkStatus)}><option>全部</option>{statuses.map((status) => <option key={status}>{status}</option>)}</select></label><label>地點<select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value as LocationFilter)}><option>全部</option><option>有地點</option><option>無地點</option></select></label><label>排序<select value={sort} onChange={(event) => setSort(event.target.value as SortOption)}><option value="recentCreated">最近新增</option><option value="recentUpdated">最近更新</option><option value="priority">優先度高到低</option></select></label></div></section><p className="result-count">共 {shown.length} 筆收藏</p>{shown.length ? shown.map((item) => <BookmarkCard key={item.id} item={item} edit={edit} remove={remove} />) : <div className="empty-state">沒有符合目前篩選條件的收藏</div>}</>}
-    {tab === '地圖' && <><GoogleMapPanel items={bookmarks.filter((item) => item.hasLocation).map((item) => ({ id: item.id, title: item.title, placeName: item.placeName || item.address || '', lat: item.lat, lng: item.lng }))} /><section className="section-heading compact"><div><p>你的收藏地點</p><h2>有地點的收藏</h2></div></section>{bookmarks.filter((item) => item.hasLocation).length ? bookmarks.filter((item) => item.hasLocation).map((item) => <BookmarkCard key={item.id} item={item} edit={edit} remove={remove} />) : <div className="empty-state">尚未有標註地點的收藏</div>}</>}
+    {tab === '地圖' && <><GoogleMapPanel items={locationBookmarks.map((item) => ({ id: item.id, title: item.title, placeName: item.placeName || item.address || '', mainCategory: item.mainCategory, lat: item.lat, lng: item.lng }))} onPosition={setCurrentPosition} onSelect={(id) => setSelectedBookmark(bookmarks.find((item) => item.id === id) || null)} /><section className="section-heading compact"><div><p>{selectedBookmark ? 'Marker 選取結果' : currentPosition ? '依目前位置排序' : '你的收藏地點'}</p><h2>{selectedBookmark ? '選取的收藏' : currentPosition ? '附近收藏' : '有地點的收藏'}</h2></div></section>{selectedBookmark ? <BookmarkCard item={selectedBookmark} edit={edit} remove={remove} /> : nearbyBookmarks.length ? nearbyBookmarks.map((item) => <BookmarkCard key={item.id} item={item} edit={edit} remove={remove} />) : <div className="empty-state">尚未有標註地點的收藏</div>}</>}
     {tab === '新增' && <BookmarkForm key={editing?.id || 'new'} initial={editing || emptyBookmark()} categories={categories} subCategories={subCategories} save={save} cancel={() => { setEditing(null); setTab('首頁'); }} saving={saving} />}
-    {tab === '分類' && <><section className="category-overview"><h2>收藏總覽 <span>{bookmarks.length} 筆</span></h2>{categories.map((category) => { const count = bookmarks.filter((item) => item.mainCategory === category).length; return <div className="category-overview__row" key={category}><span>{category}</span><b>{count}</b><i style={{ width: Math.max(5, bookmarks.length ? count / bookmarks.length * 100 : 5) + '%' }} /></div>; })}</section><CategoryManager categories={categories} subCategories={subCategories} onChange={(nextCategories, nextSubCategories) => { setCategories(nextCategories); setSubCategories(nextSubCategories); }} /></>}
+    {tab === '分類' && <><section className="category-overview"><h2>收藏總覽 <span>{bookmarks.length} 筆</span></h2>{categories.filter((category) => bookmarks.some((item) => item.mainCategory === category)).length ? categories.filter((category) => bookmarks.some((item) => item.mainCategory === category)).map((category) => { const count = bookmarks.filter((item) => item.mainCategory === category).length; return <div className="category-overview__row" key={category}><span>{category}</span><b>{count}</b><i style={{ width: Math.max(5, bookmarks.length ? count / bookmarks.length * 100 : 5) + '%' }} /></div>; }) : <div className="overview-empty">目前還沒有收藏資料</div>}</section><CategoryManager categories={categories} subCategories={subCategories} onChange={(nextCategories, nextSubCategories) => { setCategories(nextCategories); setSubCategories(nextSubCategories); }} /></>}
     <nav className="bottom-tab-bar">{nav.map(({ label, icon: Icon }) => <button key={label} className={tab === label ? 'active' : ''} onClick={() => { if (label === '新增') openNew(); else { setEditing(null); setTab(label); } }}><span className="bottom-tab-bar__icon"><Icon /></span><span>{label}</span></button>)}</nav>
   </main>;
 }
