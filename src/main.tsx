@@ -15,6 +15,7 @@ type LocationFilter = '全部' | '有地點' | '無地點';
 type DataSource = 'firebase' | 'fallback';
 const CONFIG_KEY = 'shortVideoCategoryConfig';
 const FALLBACK_KEY = 'shortVideoBookmarks';
+const FALLBACK_MIGRATED_KEY = 'shortVideoBookmarksMigratedToFirestore';
 const defaultCategories = ['旅遊', '美食', '購物', '知識', '學習', 'AI工具', '工作', '投資', '生活', '車用', '健康', '其他'];
 const statuses: BookmarkStatus[] = ['待整理', 'AI待確認', '已確認', '想看', '想學', '想買', '想去', '進行中', '已完成', '已購買', '已去過', '封存'];
 const defaultSubCategories: Record<string, string[]> = {
@@ -118,7 +119,15 @@ function App() {
     let unsubscribe: (() => void) | undefined;
     if (!isFirebaseConfigured) { setSource('fallback'); setBookmarks(localBookmarks()); setDataMessage('Firebase 尚未設定，目前使用此裝置的暫存資料。'); return; }
     ensureFirebaseSession().then(() => {
-      unsubscribe = subscribeBookmarks((next) => { setSource('firebase'); setBookmarks(next.map(normalBookmark)); setDataMessage(''); }, (error) => { setSource('fallback'); setBookmarks(localBookmarks()); setDataMessage('Firestore 無法連線：' + error.message + '。目前改用這台裝置的暫存資料。'); });
+      unsubscribe = subscribeBookmarks((next) => {
+        const legacy = localBookmarks();
+        if (!next.length && legacy.length && !localStorage.getItem(FALLBACK_MIGRATED_KEY)) {
+          setDataMessage('正在將這台裝置原有的 ' + legacy.length + ' 筆收藏匯入 Firestore…');
+          Promise.all(legacy.map(({ id, createdAt, updatedAt, ...legacyItem }) => addBookmark(legacyItem as BookmarkInput))).then(() => localStorage.setItem(FALLBACK_MIGRATED_KEY, 'true')).catch((error: Error) => setDataMessage('舊資料匯入 Firestore 失敗：' + error.message));
+          return;
+        }
+        setSource('firebase'); setBookmarks(next.map(normalBookmark)); setDataMessage('');
+      }, (error) => { setSource('fallback'); setBookmarks(localBookmarks()); setDataMessage('Firestore 無法連線：' + error.message + '。目前改用這台裝置的暫存資料。'); });
     }).catch((error: Error) => { setSource('fallback'); setBookmarks(localBookmarks()); setDataMessage('Firebase 驗證或 Firestore 無法連線：' + error.message + '。目前改用這台裝置的暫存資料。'); });
     return () => unsubscribe?.();
   }, []);
