@@ -33,6 +33,7 @@ export type Bookmark = {
   hasLocation: boolean;
   placeName?: string;
   address?: string;
+  addressHint?: string;
   lat?: number;
   lng?: number;
   googlePlaceId?: string;
@@ -44,6 +45,8 @@ export type Bookmark = {
   aiSuggestedStatus?: string;
   aiSuggestedLocation?: string;
   aiConfidence?: number;
+  analysisBasis?: 'public_content' | 'title_only' | 'unavailable' | string;
+  needsConfirmation?: boolean;
   createdAt: FirestoreDate;
   updatedAt?: FirestoreDate;
   confirmedAt?: FirestoreDate;
